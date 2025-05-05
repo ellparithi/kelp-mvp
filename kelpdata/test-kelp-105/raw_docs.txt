@@ -1,0 +1,10 @@
+Hey! This is a test document for Kelp. Hope this succeeds. Let’s go!
+Kelp is a project to build private small language models for individuals and businesses.
+Location: New York City.
+Hey!   This is a test document for Kelp.   Hope this succeeds.   Let’s go!
+Founder of Kelp: Elamparithi Kavi Elango   Elamparithi Kavi Elango is an MS Management & Systems in New York University.
+Hey! This is a test document for Kelp. Hope this succeeds. Let’s go!
+Kelp is a project to build private small language models for individuals and businesses.
+Location: New York City.
+Hey!   This is a test document for Kelp.   Hope this succeeds.   Let’s go!
+Founder of Kelp: Elamparithi Kavi Elango   Elamparithi Kavi Elango is an MS Management & Systems in New York University.
