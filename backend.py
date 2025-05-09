@@ -4,10 +4,13 @@
 import os
 import io
 import chromadb
+import openai
 from chromadb import PersistentClient
 from chromadb.config import Settings
 from openai import OpenAI
 from dotenv import load_dotenv
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import csv
 import docx2txt
@@ -16,6 +19,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import json
+from rank_bm25 import BM25Okapi
 
 sparse_indexes = {}  # kelp_name -> {vectorizer, matrix, documents}
 
@@ -30,11 +34,19 @@ chroma_client = PersistentClient(path="./chroma_db")
 
 # ========== Smart Chunking Initialization ==========
 smart_text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=50,
+    chunk_size=800,
+    chunk_overlap=200,
     length_function=len,
     separators=["\n\n", "\n", ".", " ", ""]
 )
+
+def get_or_create_collection(collection_name):
+    embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
+    return Chroma(
+        collection_name,
+        persist_directory=f"chroma_db/{collection_name}",
+        embedding_function=embedding_function
+    )
 
 # ========== File Reading ==========
 def extract_text_from_file(file):
@@ -75,25 +87,21 @@ def extract_text_from_file(file):
         return ""
 
 def build_sparse_index(collection_name):
-    """
-    Build and cache TF-IDF sparse index for a given Kelp collection.
-    """
     collection = get_or_create_collection(collection_name)
-    data = collection.get(include=["documents"])
-    documents = data.get("documents", [])
-
-    if not documents:
-        print(f"⚠️ No documents to index for {collection_name}")
+    docs = collection.get(include=["documents"]).get("documents", [])
+    if not docs:
+        print(f"⚠️ No docs found to index for: {collection_name}")
         return
 
-    vectorizer = TfidfVectorizer(stop_words='english')
-    tfidf_matrix = vectorizer.fit_transform(documents)
+    tokenized_docs = [doc.lower().split() for doc in docs]
+    bm25 = BM25Okapi(tokenized_docs)
 
     sparse_indexes[collection_name] = {
-        "vectorizer": vectorizer,
-        "matrix": tfidf_matrix,
-        "documents": documents
+        "bm25": bm25,
+        "documents": docs,
+        "tokenized": tokenized_docs
     }
+
 
 # ========== Basic ChromaDB Operations ==========
 
@@ -101,10 +109,9 @@ def get_or_create_collection(collection_name):
     return chroma_client.get_or_create_collection(name=collection_name)
 
 def add_document_to_kelp(collection_name, document_text, metadata=None):
-    collection = get_or_create_collection(collection_name)
+    collection = get_or_create_collection(collection_name)  # Uses persistent Chroma
+
     chunks = smart_text_splitter.split_text(document_text)
-    source_title = metadata.get("source") if metadata else "uploaded"
-    metadata_list = [{"source_title": source_title}] * len(chunks)
     source_title = metadata.get("source") if metadata else "uploaded"
     metadata_list = [{"source_title": source_title}] * len(chunks)
     chunk_ids = [f"doc-{hash(chunk)}" for chunk in chunks]
@@ -115,6 +122,7 @@ def add_document_to_kelp(collection_name, document_text, metadata=None):
             metadatas=metadata_list,
             ids=chunk_ids,
         )
+        print(f"✅ Added {len(chunks)} chunks to {collection_name}")
     except Exception as e:
         print(f"❌ Error adding document to Kelp: {str(e)}")
 
@@ -139,7 +147,7 @@ def delete_entire_kelp(collection_name: str):
 
 # ========== Retrieval ==========
 
-def retrieve_relevant_memories(collection_name, query, top_k=10, similarity_threshold=0.65):
+def retrieve_relevant_memories(collection_name, query, top_k=40, similarity_threshold=0.6):
     try:
         collection = get_or_create_collection(collection_name)
         results = collection.query(
@@ -165,10 +173,11 @@ def retrieve_relevant_memories(collection_name, query, top_k=10, similarity_thre
         print(f"❌ Error retrieving memories: {str(e)}")
         return []
 
-def hybrid_retrieve_memories(collection_name, query, top_k=10, dense_weight=0.5):
+def hybrid_retrieve_memories(collection_name, query, top_k=40, dense_weight=0.5):
     """
     Combine dense Chroma and sparse TF-IDF scores to retrieve top memory chunks.
     """
+
     # ----- Step 1: Dense (Chroma) -----
     collection = get_or_create_collection(collection_name)
     dense_results = collection.query(
@@ -181,7 +190,7 @@ def hybrid_retrieve_memories(collection_name, query, top_k=10, dense_weight=0.5)
     dense_distances = dense_results.get("distances", [[]])[0]
     dense_scores = [1 - d for d in dense_distances]  # convert distance to similarity
 
-    # ----- Step 2: Sparse (TF-IDF) -----
+    # ------ Step 2: Sparse (BM25) ------
     if collection_name not in sparse_indexes:
         build_sparse_index(collection_name)
 
@@ -189,9 +198,9 @@ def hybrid_retrieve_memories(collection_name, query, top_k=10, dense_weight=0.5)
     if not index:
         return dense_docs  # fallback
 
-    vec = index["vectorizer"].transform([query])
-    sims = cosine_similarity(vec, index["matrix"]).flatten()
-    sparse_scores = sims.tolist()
+    bm25 = index["bm25"]
+    tokenized_query = query.lower().split()
+    sparse_scores = bm25.get_scores(tokenized_query)
     sparse_docs = index["documents"]
 
     # ----- Step 3: Merge scores -----
@@ -203,21 +212,34 @@ def hybrid_retrieve_memories(collection_name, query, top_k=10, dense_weight=0.5)
     for doc, score in zip(sparse_docs, sparse_scores):
         doc_scores[doc] = doc_scores.get(doc, 0) + score * (1 - dense_weight)
 
-   
-    # ------ Step 4: Rerank & fallback buffer ------
+
+   # ------ Step 4: Hybrid filter with cap ------
+   # Adaptive confidence threshold
+    if len(query.split()) > 25:
+        confidence_threshold = 0.50  # longer queries are often fuzzier
+    else:
+        confidence_threshold = 0.65
+
     sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
 
-    # Separate high- and low-confidence chunks
-    confidence_threshold = 0.75
     top_strong = [doc for doc, score in sorted_docs if score >= confidence_threshold]
     top_weak = [doc for doc, score in sorted_docs if score < confidence_threshold]
 
-    # If strong set is too small, pad with top weak matches
-    if len(top_strong) < top_k and top_weak:
-        top_weak_trimmed = top_weak[: (top_k - len(top_strong))]
+    # Step 1: If enough strong chunks, use them
+    if len(top_strong) >= 8:
+        top_docs = top_strong[:8]
+
+    # Step 2: If not, pad with top weak matches
+    elif top_strong:
+        top_weak_trimmed = top_weak[:(8 - len(top_strong))]
         top_docs = top_strong + top_weak_trimmed
+
+    # Step 3: If no strong chunks at all, fallback to top N from all
     else:
-        top_docs = top_strong[:top_k]
+        top_docs = [doc for doc, _ in sorted_docs[:8]]
+
+    if len(top_docs) < 3:
+        top_docs = [doc for doc, _ in sorted_docs[:3]]
 
     return top_docs
 
@@ -232,7 +254,7 @@ def kelp_kbase_reasoning(collection_name: str, user_prompt: str, max_tokens: int
         # Step 1: Retrieve relevant memory chunks
         # Dynamically adjust top_k based on prompt length
         word_count = len(user_prompt.strip().split())
-        top_k = 8 if word_count < 20 else 4
+        top_k = 40 if word_count < 20 else 20
 
         # Initial hybrid retrieval
         memories = hybrid_retrieve_memories(collection_name, user_prompt, top_k=top_k)
@@ -247,7 +269,7 @@ def kelp_kbase_reasoning(collection_name: str, user_prompt: str, max_tokens: int
         # Optional GPT reranking if too many chunks or if fuzzy match likely
         if len(memories) > 4:
             ranking_prompt = (
-                f"You are a memory filter. From the following context chunks, choose the 3 most useful ones "
+                f"You are a memory filter that needs to retrieve the right memory for the prompt user sends. From the following context chunks, choose the 3 most useful and relevant ones "
                 f"for answering this user question.\n\n"
                 f"User Question: {user_prompt}\n\n"
                 f"Chunks:\n" + "\n\n".join(f"[{i+1}] {chunk}" for i, chunk in enumerate(memories)) +
@@ -258,7 +280,7 @@ def kelp_kbase_reasoning(collection_name: str, user_prompt: str, max_tokens: int
                 rerank_response = client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "system", "content": "You are Kelp, a helpful assistant."},
                         {"role": "user", "content": ranking_prompt}
                     ],
                     temperature=0,
@@ -329,7 +351,7 @@ def kelp_kawl_reasoning(user_input, base_answer=None, memory_context=None, mode=
         system_prompt = (
             "You are Kawl, an advanced AI assistant that builds on the user's memory context and base answer. "
             "Improve clarity, tone, and logical precision in your response. Stay within the context boundaries. "
-            "Avoid making up facts. Optionally apply the following style modes: 'default', 'business', 'summary', 'story'."
+            "Avoid making up facts."
         )
 
         # Build prompt content

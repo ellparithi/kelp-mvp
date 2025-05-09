@@ -54,13 +54,39 @@ def infer_kelpbrain(req: QueryRequest):
         # 🧠 Memory Retrieval
         # Step 1: Dynamic top_k based on prompt length
         word_count = len(req.prompt.strip().split())
-        top_k = 8 if word_count < 20 else 4
+        top_k = 40 if word_count < 20 else 20
         memories = hybrid_retrieve_memories(req.kelp_name, req.prompt, top_k=top_k)
+
+        # 🔁 Multi-Query Expansion Fallback (if very few matches found)
+        if len(memories) < 3:
+            expansion_prompt = f"Rewrite the following question using 2–3 alternative phrasings or synonyms:\n\n'{req.prompt}'"
+            expansion_response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": expansion_prompt}],
+                temperature=0.7,
+            )
+            # Parse the response (assumes comma-separated or newline list)
+            alt_queries = expansion_response.choices[0].message.content.strip().split("\n")
+            alt_queries = [q.strip(" -•") for q in alt_queries if len(q.strip()) > 0]
+
+            # Expand the query list
+            expanded_prompts = [req.prompt] + alt_queries[:3]
+
+            # Run hybrid retrieval for each variation and merge results
+            all_memories = []
+            for variant in expanded_prompts:
+                all_memories.extend(hybrid_retrieve_memories(req.kelp_name, variant, top_k=top_k))
+
+            # De-duplicate
+            memories = list(dict.fromkeys([m.strip() for m in all_memories if m.strip()]))
+
 
         # Step 2: GPT reranking if too many chunks
         if len(memories) > 4:
+            memories = memories[:6]  # Cap before rerank
             rerank_prompt = (
-                f"You are a memory filter. From the following chunks, select the 3 most useful ones to answer:\n\n"
+                f"You are a memory filter that needs to retrieve the right memory for the prompt user sends. From the following chunks, select the 3 most useful and relevant ones to answer the user prompt:\n\n"
+                f"Return only the texts that are relevant. Ignore unrelated or vague ones.\n\n"
                 f"User Question: {req.prompt}\n\n"
                 f"Chunks:\n" + "\n\n".join(f"[{i+1}] {chunk}" for i, chunk in enumerate(memories)) +
                 "\n\nReturn only the chunk texts you find relevant."
@@ -76,7 +102,7 @@ def infer_kelpbrain(req: QueryRequest):
                     max_tokens=1000
                 )
                 rerank_text = rerank_response.choices[0].message.content
-                filtered = [chunk for chunk in memories if chunk[:20] in rerank_text]
+                filtered = [chunk for i, chunk in enumerate(memories) if f"[{i+1}]" in rerank_text]
                 if filtered:
                     memories = filtered
             except Exception as e:
@@ -95,7 +121,7 @@ def infer_kelpbrain(req: QueryRequest):
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a private assistant that answers based only on the provided context. If the answer is not in the context, say 'I'm sorry, I don't have enough information based on the memory.'"},
+                    {"role": "system", "content": "You are Kelp, a private assistant that answers based only on the provided context. If the answer is not in the context, say 'I'm sorry, I don't have enough information based on the memory.'"},
                     {"role": "user", "content": final_prompt}
                 ],
                 max_tokens=req.max_tokens,
@@ -109,7 +135,7 @@ def infer_kelpbrain(req: QueryRequest):
             response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are an advanced assistant using uploaded memories. You must combine insights if possible. If context is missing, explain politely."},
+                    {"role": "system", "content": "You are Kelp, an advanced assistant using uploaded memories. You must combine insights if possible. If context is missing, explain politely."},
                     {"role": "user", "content": final_prompt}
                 ],
                 max_tokens=req.max_tokens,
