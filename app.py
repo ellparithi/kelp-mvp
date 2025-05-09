@@ -29,6 +29,9 @@ def sanitize_kelp_name(name):
     sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', name.strip())
     return sanitized[:512] or "kelp_default"
 
+def clear_prompt_input():
+    st.session_state["prompt_input"] = ""
+
 load_dotenv()
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
@@ -150,6 +153,8 @@ if selected_chat != "New Chat" and selected_chat != st.session_state.chat_sessio
     st.session_state.chat_history = load_chat_session(
         st.session_state.active_kelp, selected_chat
     )
+    st.session_state.clear_prompt_flag = True  # ✅ Safe deferral
+    st.rerun()
 
 if selected_chat != "New Chat":
     if st.button("Delete Selected Chat"):
@@ -161,6 +166,15 @@ if selected_chat != "New Chat":
 # ---------- Chat Logic ----------
 st.subheader("Chat with your Kelp!")
 
+# Initialize flags
+if "clear_prompt_flag" not in st.session_state:
+    st.session_state.clear_prompt_flag = False
+
+# Actually clear input AFTER rerun
+if st.session_state.clear_prompt_flag:
+    st.session_state["prompt_input"] = ""
+    st.session_state.clear_prompt_flag = False
+
 reasoning_mode = st.radio(
     "Choose Reasoning Mode:", ["KBase (Strict)", "Kawl (Enhanced)"], horizontal=True
 )
@@ -168,13 +182,12 @@ reasoning_mode = st.radio(
 user_input = st.text_input("Enter your prompt:", key="prompt_input")
 
 if st.button("Ask") and user_input:
-    # Create a new session if needed
+     # Create a new session if needed
     if st.session_state.chat_session_id is None:
         chat_name = user_input.strip().replace("_", " ").strip()[:30]
         st.session_state.chat_session_id = chat_name
         st.session_state.chat_history = []
-        st.rerun()
-
+       
     st.session_state.chat_history.append(("user", user_input))
 
     result = kelp_kbase_reasoning(st.session_state.active_kelp, user_input)
@@ -192,6 +205,9 @@ if st.button("Ask") and user_input:
         st.session_state.chat_session_id,
         st.session_state.chat_history,
     )
+
+    st.session_state.clear_prompt_flag = True
+    st.rerun()
 
 # ---------- Display Chat ----------
 for role, text in st.session_state.chat_history:
