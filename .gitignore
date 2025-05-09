@@ -1,0 +1,13 @@
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+.idea/
+.DS_Store
+.streamlit/config.toml
+.ipynb_checkpoints/
+*.db
