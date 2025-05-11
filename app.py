@@ -1,19 +1,17 @@
 
 import streamlit as st
-from datetime import datetime
 import chromadb
 import os
 from dotenv import load_dotenv
+from backend import build_doc_corpus
+from backend import store_doc_corpus_to_chroma, load_doc_corpus_from_chroma
 
 from backend import (
     get_or_create_collection,
-    add_document_to_kelp,
-    retrieve_relevant_memories,
     delete_documents_from_kelp,
     delete_entire_kelp,
     kelp_kbase_reasoning,
     kelp_kawl_reasoning,
-    extract_text_from_file,
 )
 from chat_manager import (
     list_chat_sessions,
@@ -104,13 +102,16 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    for file in uploaded_files:
-        text = extract_text_from_file(file)
-        if text.strip():
-            metadata = {"source": file.name}
-            add_document_to_kelp(st.session_state.active_kelp, text, metadata)
-    st.success(f"Uploaded {len(uploaded_files)} document(s).")
+    uploaded_filenames = [f.name for f in uploaded_files]
+    session_filenames = [d["filename"] for d in st.session_state.get("doc_corpus", [])]
 
+    if uploaded_filenames != session_filenames:
+        doc_corpus = build_doc_corpus(uploaded_files)
+        st.session_state["doc_corpus"] = doc_corpus
+        store_doc_corpus_to_chroma(st.session_state.active_kelp, doc_corpus)
+        st.success(f"Loaded {len(doc_corpus)} document(s) into memory for reasoning.")
+
+   
 # ---------- Manage Documents ----------
 try:
     collection = get_or_create_collection(st.session_state.active_kelp)
@@ -120,7 +121,7 @@ try:
     metas = docs.get("metadatas", [])
 
     if doc_ids:
-        doc_options = [f"{i+1}. {meta.get('source_title', '')}" for i, meta in enumerate(metas)]
+        doc_options = [f"{i+1}. {meta.get('filename', 'Untitled')}" for i, meta in enumerate(metas)]
         doc_id_map = {opt: doc_ids[i] for i, opt in enumerate(doc_options)}
         to_delete = st.multiselect("Select documents to delete:", doc_options)
         if st.button("Delete Selected Document(s)"):
@@ -181,19 +182,29 @@ reasoning_mode = st.radio(
 
 user_input = st.text_input("Enter your prompt:", key="prompt_input")
 
+if "doc_corpus" not in st.session_state or not st.session_state["doc_corpus"]:
+    doc_corpus = load_doc_corpus_from_chroma(st.session_state.active_kelp)
+    st.session_state["doc_corpus"] = doc_corpus
+
 if st.button("Ask") and user_input:
-     # Create a new session if needed
+    # Create a new session if needed
     if st.session_state.chat_session_id is None:
         chat_name = user_input.strip().replace("_", " ").strip()[:30]
         st.session_state.chat_session_id = chat_name
         st.session_state.chat_history = []
-       
+
     st.session_state.chat_history.append(("user", user_input))
 
-    result = kelp_kbase_reasoning(st.session_state.active_kelp, user_input)
+    if "doc_corpus" not in st.session_state or not st.session_state["doc_corpus"]:
+        st.error("❌ No documents uploaded or parsed. Please upload some first.")
+        st.stop()
+
+    # Run KBase and extract answer + context
+    result = kelp_kbase_reasoning(user_input, st.session_state["doc_corpus"])
     base_answer = result["answer"]
     memory_context = result["context"]
 
+    # If user selected Kawl, run Claude-based enhancement
     if reasoning_mode.startswith("Kawl"):
         final_answer = kelp_kawl_reasoning(user_input, base_answer, memory_context)
     else:
@@ -208,6 +219,7 @@ if st.button("Ask") and user_input:
 
     st.session_state.clear_prompt_flag = True
     st.rerun()
+
 
 # ---------- Display Chat ----------
 for role, text in st.session_state.chat_history:

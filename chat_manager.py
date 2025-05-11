@@ -16,12 +16,13 @@ def list_chat_sessions(kelp_name):
 def save_chat_session(kelp_name, session_id, messages):
     kelp_dir = get_chat_dir(kelp_name)
     os.makedirs(kelp_dir, exist_ok=True)
-    path = os.path.join(kelp_dir, f"{session_id}.json")
+    
+    # Sanitize session_id
+    safe_name = session_id.strip().replace(" ", "_")[:100]  # limit length for safety
+    path = os.path.join(kelp_dir, f"{safe_name}.json")
+    
     with open(path, "w") as f:
         json.dump(messages, f)
-    
-    safe_name = session_id.replace(" ", "_")
-    path = os.path.join(get_chat_dir(kelp_name), f"{safe_name}.json")
 
 def load_chat_session(kelp_name, session_id):
     path = os.path.join(get_chat_dir(kelp_name), f"{session_id}.json")
