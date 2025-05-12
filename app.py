@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from backend import build_doc_corpus
 from backend import store_doc_corpus_to_chroma, load_doc_corpus_from_chroma
 
+
 from backend import (
     get_or_create_collection,
     delete_documents_from_kelp,
@@ -28,7 +29,7 @@ def sanitize_kelp_name(name):
     return sanitized[:512] or "kelp_default"
 
 def clear_prompt_input():
-    st.session_state["prompt_input"] = ""
+    st.session_state["user_prompt"] = ""
 
 load_dotenv()
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
@@ -88,7 +89,9 @@ if st.sidebar.button("Delete Current Kelp"):
             st.rerun()
 
 # ---------- Main Area ----------
-st.title("Chat with your Kelp!")
+st.title("Welcome!")
+st.subheader("File Manager")
+
 
 if not st.session_state.active_kelp:
     st.warning("Please select or create a Kelp to begin.")
@@ -96,10 +99,15 @@ if not st.session_state.active_kelp:
 
 # ---------- Upload Documents ----------
 uploaded_files = st.file_uploader(
-    f"Upload Documents for `{st.session_state.active_kelp}`",
+    f"Upload Documents for `{st.session_state.active_kelp}` (Max 10 files)",
     type=["pdf", "docx", "txt", "csv"],
     accept_multiple_files=True,
 )
+
+# Enforce file upload limit
+if uploaded_files and len(uploaded_files) > 10:
+    st.warning("Please upload no more than 10 files.")
+    st.stop()
 
 if uploaded_files:
     uploaded_filenames = [f.name for f in uploaded_files]
@@ -137,24 +145,33 @@ except Exception as e:
 # ---------- Chat Manager ----------
 st.subheader("Chats")
 
-# Handle start new chat
 if st.button("Start a New Chat"):
-    st.session_state.chat_session_id = None
+    st.session_state.chat_session_id = "New Chat"
     st.session_state.chat_history = []
-    st.session_state["prompt_input"] = ""
+    st.session_state["user_prompt"] = ""
+    st.rerun()
 
 # Load chats
 chats = list_chat_sessions(st.session_state.active_kelp)
 chat_display = ["New Chat"] + chats
-selected_chat = st.selectbox("📁 Select a Chat:", options=chat_display)
+current_chat_id = st.session_state.get("chat_session_id")
 
-# If switching to saved chat
-if selected_chat != "New Chat" and selected_chat != st.session_state.chat_session_id:
+# Safely fall back to "New Chat" if current session is not in the list
+if current_chat_id not in chat_display:
+    current_chat_id = "New Chat"
+
+selected_chat = st.selectbox(
+    "Select a Chat:",
+    options=chat_display,
+    index=chat_display.index(current_chat_id)
+)
+
+if selected_chat != st.session_state.chat_session_id:
     st.session_state.chat_session_id = selected_chat
     st.session_state.chat_history = load_chat_session(
         st.session_state.active_kelp, selected_chat
     )
-    st.session_state.clear_prompt_flag = True  # ✅ Safe deferral
+    st.session_state.clear_prompt_flag = True
     st.rerun()
 
 if selected_chat != "New Chat":
@@ -173,14 +190,18 @@ if "clear_prompt_flag" not in st.session_state:
 
 # Actually clear input AFTER rerun
 if st.session_state.clear_prompt_flag:
-    st.session_state["prompt_input"] = ""
+    st.session_state["user_prompt"] = ""
     st.session_state.clear_prompt_flag = False
 
 reasoning_mode = st.radio(
-    "Choose Reasoning Mode:", ["KBase (Strict)", "Kawl (Enhanced)"], horizontal=True
+    "Choose Reasoning Mode:", ["KBase", "Kawl (Advanced)"], horizontal=True
 )
 
-user_input = st.text_input("Enter your prompt:", key="prompt_input")
+user_input = st.text_area(
+    "Ask a question",
+    height=150,
+    key="user_prompt"
+)
 
 if "doc_corpus" not in st.session_state or not st.session_state["doc_corpus"]:
     doc_corpus = load_doc_corpus_from_chroma(st.session_state.active_kelp)
@@ -196,7 +217,7 @@ if st.button("Ask") and user_input:
     st.session_state.chat_history.append(("user", user_input))
 
     if "doc_corpus" not in st.session_state or not st.session_state["doc_corpus"]:
-        st.error("❌ No documents uploaded or parsed. Please upload some first.")
+        st.error("No documents uploaded or parsed. Please upload some first.")
         st.stop()
 
     # Run KBase and extract answer + context
@@ -223,4 +244,23 @@ if st.button("Ask") and user_input:
 
 # ---------- Display Chat ----------
 for role, text in st.session_state.chat_history:
-    st.markdown(f"**{'You' if role == 'user' else 'Kelp'}:** {text}")
+    if role == "user":
+        with st.container():
+            st.markdown(
+                f"""
+                <div style="background-color:#000000; color:white; padding:10px 14px; border-radius:8px; max-width: 70%; margin-left:auto; margin-bottom: 10px; text-align: left;">
+                    {text}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:  # Kelp's response
+        with st.container():
+            st.markdown(
+                f"""
+                <div style="background-color:#f9f9f9; padding:12px 16px; border-radius:10px; border: 1px solid #ddd; margin-bottom: 15px;">
+                    {text}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
