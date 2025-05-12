@@ -50,11 +50,11 @@ def infer_kelpbrain(req: QueryRequest):
                 return {"response": answer}
 
             else:
-                return {"response": "❌ Invalid reasoning mode selected."}
+                return {"response": "Invalid reasoning mode selected."}
 
         else:
-            return {"response": "❌ No document corpus provided."}
+            return {"response": "No document corpus provided."}
 
     except Exception as e:
-        print(f"❌ Error during inference: {e}")
-        return {"response": f"❌ Internal KelpBrain Error: {str(e)}"}
+        print(f"Error during inference: {e}")
+        return {"response": f"Internal KelpBrain Error: {str(e)}"}

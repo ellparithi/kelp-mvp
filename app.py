@@ -91,6 +91,33 @@ if st.sidebar.button("Delete Current Kelp"):
 # ---------- Main Area ----------
 st.title("Welcome!")
 
+if not st.session_state.active_kelp:
+    st.markdown(
+        """
+<div style='background-color:#f0f0f5; padding: 24px; border-radius: 12px; border: 1px solid #ccc;'>
+<h3><strong>Kelp MVP</strong></h3>
+<p>A demo version of <strong>Kelp</strong> – the future of secure Intelligence.</p>
+
+<ul>
+<li>Upload <strong>up to 10 documents</strong> (PDF, DOCX, TXT, or CSV).</li>
+<li>Converse with <strong>KBase</strong> or <strong>Kawl (Advanced)</strong> who are equipped to answer/do tasks referring the documents.</li>
+<li>To get started: <strong>Create or select a Kelp</strong> from the sidebar.</li>
+</ul>
+
+<hr style="margin: 20px 0;">
+
+<p><strong>Note:</strong> Please do not upload confidential or sensitive data. This MVP is for demonstration only and is not fully private like the final product will be.</p>
+<p><strong>Important:</strong> This MVP is hosted on Render and does not persist memory between sessions. For persistent deployment, please reach out.</p>
+
+<p style='margin-top: 20px;'>
+Created by <strong>Elamparithi Kavi Elango</strong><br>
+Contact: <a href="mailto:elamparithi.ke@gmail.com">elamparithi.ke@gmail.com</a><br>
+Website: <a href="https://www.kelpllm.com" target="_blank">www.kelpllm.com</a>
+</p>
+</div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 if not st.session_state.active_kelp:
@@ -98,17 +125,13 @@ if not st.session_state.active_kelp:
     st.stop()
 
 st.subheader("File Manager")
+
 # ---------- Upload Documents ----------
 uploaded_files = st.file_uploader(
     f"Upload Documents for `{st.session_state.active_kelp}` (Max 10 files)",
     type=["pdf", "docx", "txt", "csv"],
     accept_multiple_files=True,
 )
-
-# Enforce file upload limit
-if uploaded_files and len(uploaded_files) > 10:
-    st.warning("Please upload no more than 10 files.")
-    st.stop()
 
 if uploaded_files:
     uploaded_filenames = [f.name for f in uploaded_files]
@@ -157,14 +180,17 @@ chats = list_chat_sessions(st.session_state.active_kelp)
 chat_display = ["New Chat"] + chats
 current_chat_id = st.session_state.get("chat_session_id")
 
-# Safely fall back to "New Chat" if current session is not in the list
-if current_chat_id not in chat_display:
-    current_chat_id = "New Chat"
+# Ensure new chat name is added to dropdown options before rendering
+if (
+    st.session_state.chat_session_id
+    and st.session_state.chat_session_id not in chat_display
+):
+    chat_display.append(st.session_state.chat_session_id)
 
 selected_chat = st.selectbox(
     "Select a Chat:",
     options=chat_display,
-    index=chat_display.index(current_chat_id)
+    index=chat_display.index(st.session_state.chat_session_id) if st.session_state.chat_session_id in chat_display else 0
 )
 
 if selected_chat != st.session_state.chat_session_id:
@@ -210,10 +236,16 @@ if "doc_corpus" not in st.session_state or not st.session_state["doc_corpus"]:
 
 if st.button("Ask") and user_input:
     # Create a new session if needed
-    if st.session_state.chat_session_id is None:
+    if st.session_state.chat_session_id in [None, "New Chat"]:
         chat_name = user_input.strip().replace("_", " ").strip()[:30]
         st.session_state.chat_session_id = chat_name
         st.session_state.chat_history = []
+         # 🔧 Sync dropdown to reflect the new chat
+        st.session_state.current_chat_id = chat_name
+
+        # Force reload corpus on new chat
+        st.session_state["doc_corpus"] = load_doc_corpus_from_chroma(st.session_state.active_kelp)
+
 
     st.session_state.chat_history.append(("user", user_input))
 

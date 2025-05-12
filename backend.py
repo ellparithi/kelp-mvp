@@ -159,7 +159,7 @@ def delete_documents_from_kelp(collection_name, doc_ids: list):
             return True
         return False
     except Exception as e:
-        print(f"❌ Error deleting documents: {str(e)}")
+        print(f"Error deleting documents: {str(e)}")
         return False
 
 def delete_entire_kelp(collection_name: str):
@@ -167,7 +167,7 @@ def delete_entire_kelp(collection_name: str):
         chroma_client.delete_collection(name=collection_name)
         return True
     except Exception as e:
-        print(f"❌ Error deleting kelp: {str(e)}")
+        print(f"Error deleting kelp: {str(e)}")
         return False
 
 # ========== Reasoning ==========
@@ -235,12 +235,12 @@ def kelp_kbase_reasoning(user_prompt: str, doc_corpus: list) -> dict:
     Returns both answer and context.
     """
     if not doc_corpus:
-        return {"answer": "❌ No documents available.", "context": ""}
+        return {"answer": "No documents available. Try Again/Refresh", "context": ""}
 
     try:
         selected_docs = rerank_documents_claude(doc_corpus, user_prompt)
         if not selected_docs:
-            return {"answer": "⚠️ No relevant documents found.", "context": ""}
+            return {"answer": " No relevant documents found. Try again/Refresh", "context": ""}
 
         full_context = "\n\n".join(doc["text"] for doc in selected_docs)
 
@@ -268,8 +268,8 @@ def kelp_kbase_reasoning(user_prompt: str, doc_corpus: list) -> dict:
         return {"answer": answer, "context": full_context}
 
     except Exception as e:
-        print("❌ Error in kelp_kbase_reasoning:", e)
-        return {"answer": "❌ Internal error during reasoning.", "context": ""}
+        print("Error in kelp_kbase_reasoning:", e)
+        return {"answer": "Internal error during reasoning. Try again/Refresh", "context": ""}
 
 def kelp_kawl_reasoning(user_input, base_answer=None, memory_context=None, mode="default") -> str:
     """
@@ -306,8 +306,8 @@ def kelp_kawl_reasoning(user_input, base_answer=None, memory_context=None, mode=
         return final_output.strip()
 
     except Exception as e:
-        print(f"❌ Kawl error: {str(e)}")
-        return "❌ Kawl encountered an internal error."
+        print(f"Kawl error: {str(e)}")
+        return "Kawl encountered an internal error. Try again/Refresh"
 
 
 CHAT_DIR = "kelp_chats"
