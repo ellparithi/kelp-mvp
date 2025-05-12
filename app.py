@@ -90,13 +90,14 @@ if st.sidebar.button("Delete Current Kelp"):
 
 # ---------- Main Area ----------
 st.title("Welcome!")
-st.subheader("File Manager")
+
 
 
 if not st.session_state.active_kelp:
     st.warning("Please select or create a Kelp to begin.")
     st.stop()
 
+st.subheader("File Manager")
 # ---------- Upload Documents ----------
 uploaded_files = st.file_uploader(
     f"Upload Documents for `{st.session_state.active_kelp}` (Max 10 files)",
