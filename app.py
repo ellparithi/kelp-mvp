@@ -107,6 +107,7 @@ if not st.session_state.active_kelp:
 <hr style="margin: 20px 0;">
 
 <p><strong>Note:</strong> Please do not upload confidential or sensitive data. This MVP is for demonstration only and is not fully private like the final product will be.</p>
+<p><strong> This is an early version of MVP. It answers most queries correctly (~80–90%), though occasional inconsistencies may occur as we continue to improve its accuracy.
 <p><strong>Important:</strong> This MVP is hosted on Render and does not persist memory between sessions. For persistent deployment, please reach out.</p>
 
 <p style='margin-top: 20px;'>
