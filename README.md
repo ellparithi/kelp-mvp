@@ -18,7 +18,7 @@
 
 This MVP is a **demo version** to show functionality.
 
-- ⚠ Do **not** upload confidential data — this is not fully secure
+- Do **not** upload confidential data — this is not fully secure
 - Hosted on **Render** – memory is **not persisted**
 - Reach out if you want a persistent private deployment
 
@@ -52,7 +52,7 @@ streamlit run app.py
 
 ---
 
-## 📧 Contact
+## Contact
 
 Made by **Elamparithi Kavi Elango**
 
