@@ -14,7 +14,7 @@
 
 ---
 
-## 🧪 This MVP
+## This MVP
 
 This MVP is a **demo version** to show functionality.
 
