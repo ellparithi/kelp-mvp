@@ -57,7 +57,6 @@ streamlit run app.py
 Made by **Elamparithi Kavi Elango**
 
 - Email: [elamparithi.ke@gmail.com](mailto:elamparithi.ke@gmail.com)
-- Website: [www.kelpllm.com](https://www.kelpllm.com)
 
 ---
 
